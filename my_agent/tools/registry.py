@@ -5,6 +5,7 @@ import json
 import traceback
 from typing import Any, Callable
 
+from my_agent.hooks.base import HookEvent, HookManager
 from my_agent.tools.command_tools import CommandTools
 from my_agent.tools.file_tools import FileTools
 from my_agent.workspace.manager import WorkspaceManager
@@ -112,6 +113,7 @@ def build_tool_registry(workspace: WorkspaceManager) -> ToolRegistry:
 def execute_tools(
     assistant_message: dict[str, Any],
     tool_handlers: dict[str, ToolHandler],
+    hook_manager: HookManager | None = None,
 ) -> list[dict[str, Any]]:
     tool_results: list[dict[str, Any]] = []
     for tool_call in assistant_message.get("tool_calls") or []:
@@ -121,17 +123,39 @@ def execute_tools(
         arguments = _parse_arguments(function.get("arguments", {}))
 
         try:
+            if hook_manager is not None:
+                pre_result = hook_manager.trigger(
+                    HookEvent(
+                        event_type="PreToolUse",
+                        tool_name=name,
+                        arguments=arguments,
+                        tool_call_id=tool_call_id,
+                    )
+                )
+                if not pre_result.allowed:
+                    raise PermissionError(pre_result.message)
+
             if name not in tool_handlers:
                 raise KeyError(f"Unknown tool: {name}")
             output = tool_handlers[name](arguments)
             status = "ok"
+
+            if hook_manager is not None:
+                post_result = hook_manager.trigger(
+                    HookEvent(
+                        event_type="PostToolUse",
+                        tool_name=name,
+                        arguments=arguments,
+                        tool_call_id=tool_call_id,
+                        status=status,
+                        output=output,
+                    )
+                )
+                if not post_result.allowed:
+                    raise PermissionError(post_result.message)
         except Exception as exc:
             status = "error"
-            output = {
-                "error": str(exc),
-                "type": type(exc).__name__,
-                "traceback": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
-            }
+            output = _format_exception(exc)
 
         tool_results.append(
             {
@@ -144,6 +168,14 @@ def execute_tools(
             }
         )
     return tool_results
+
+
+def _format_exception(exc: Exception) -> dict[str, Any]:
+    return {
+        "error": str(exc),
+        "type": type(exc).__name__,
+        "traceback": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
+    }
 
 
 def _parse_arguments(arguments: Any) -> dict[str, Any]:
