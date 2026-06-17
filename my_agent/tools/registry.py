@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+import traceback
+from typing import Any, Callable
+
+from my_agent.tools.command_tools import CommandTools
+from my_agent.tools.file_tools import FileTools
+from my_agent.workspace.manager import WorkspaceManager
+
+ToolHandler = Callable[[dict[str, Any]], Any]
+
+
+@dataclass
+class ToolRegistry:
+    tool_definitions: list[dict[str, Any]]
+    tool_handlers: dict[str, ToolHandler]
+
+    def get_handler(self, name: str) -> ToolHandler:
+        if name not in self.tool_handlers:
+            raise KeyError(f"Unknown tool: {name}")
+        return self.tool_handlers[name]
+
+
+def build_tool_registry(workspace: WorkspaceManager) -> ToolRegistry:
+    file_tools = FileTools(workspace)
+    command_tools = CommandTools(workspace)
+
+    tool_definitions = [
+        {
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a text file inside the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "list_dir",
+                "description": "List directory entries inside the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "run_command",
+                "description": "Run a shell command in the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "timeout_seconds": {"type": "integer"},
+                    },
+                    "required": ["command"],
+                },
+            },
+        },
+    ]
+    tool_handlers: dict[str, ToolHandler] = {
+        "read_file": file_tools.read_file,
+        "list_dir": file_tools.list_dir,
+        "run_command": command_tools.run_command,
+    }
+    return ToolRegistry(tool_definitions=tool_definitions, tool_handlers=tool_handlers)
+
+
+def execute_tools(
+    assistant_message: dict[str, Any],
+    tool_handlers: dict[str, ToolHandler],
+) -> list[dict[str, Any]]:
+    tool_results: list[dict[str, Any]] = []
+    for tool_call in assistant_message.get("tool_calls") or []:
+        tool_call_id = tool_call.get("id", "")
+        function = tool_call.get("function", {})
+        name = function.get("name", "")
+        arguments = _parse_arguments(function.get("arguments", {}))
+
+        try:
+            if name not in tool_handlers:
+                raise KeyError(f"Unknown tool: {name}")
+            output = tool_handlers[name](arguments)
+            status = "ok"
+        except Exception as exc:
+            status = "error"
+            output = {
+                "error": str(exc),
+                "type": type(exc).__name__,
+                "traceback": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
+            }
+
+        tool_results.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": json.dumps(
+                    {"status": status, "tool": name, "output": output},
+                    ensure_ascii=False,
+                ),
+            }
+        )
+    return tool_results
+
+
+def _parse_arguments(arguments: Any) -> dict[str, Any]:
+    if isinstance(arguments, dict):
+        return arguments
+    if isinstance(arguments, str):
+        try:
+            parsed = json.loads(arguments)
+        except json.JSONDecodeError:
+            return {"raw": arguments}
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
