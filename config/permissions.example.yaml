@@ -1,0 +1,36 @@
+permissions:
+  tools:
+    read_file: allow
+    list_dir: allow
+    write_file: ask
+    edit_file: ask
+    run_command: ask
+
+  paths:
+    ".env": deny
+    ".env.*": deny
+    "secrets/*": deny
+    "*.key": deny
+    "*.pem": deny
+    "README.md": ask
+
+  commands:
+    allow:
+      - "python --version"
+      - "python -m pytest"
+      - "git status"
+    ask:
+      - "git add"
+      - "git commit"
+      - "git push"
+      - "pip install"
+    deny:
+      - "rm -rf /"
+      - "rm -rf *"
+      - 'del /s /q C:\'
+      - "format"
+      - "shutdown"
+      - "reboot"
+      - 'Remove-Item -Recurse -Force C:\'
+      - "Stop-Computer"
+      - "Restart-Computer"

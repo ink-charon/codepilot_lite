@@ -1,56 +1,68 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from my_agent.hooks.base import HookEvent, HookResult
+from my_agent.policy.policy import PermissionDecision, PermissionPolicy
 from my_agent.workspace.manager import WorkspaceManager
 
 
 class PermissionHook:
-    def __init__(self, workspace: WorkspaceManager) -> None:
+    def __init__(self, workspace: WorkspaceManager, policy: PermissionPolicy | None = None) -> None:
         self.workspace = workspace
+        self.policy = policy or PermissionPolicy.default()
         self.path_tools = {"read_file", "write_file", "edit_file", "list_dir"}
-        self.confirmation_tools = {"write_file", "edit_file", "run_command"}
-        self.dangerous_command_patterns = [
-            r"\brm\s+-rf\s+/",
-            r"\brm\s+-rf\s+\*",
-            r"\bdel\s+/s\s+/q\s+c:\\",
-            r"\bformat\b",
-            r"\bshutdown\b",
-            r"\breboot\b",
-            r"\bremove-item\b.*\s-recurse\b.*\s-force\b.*c:\\",
-            r"\bstop-computer\b",
-            r"\brestart-computer\b",
-        ]
 
     def __call__(self, event: HookEvent) -> HookResult:
         if event.event_type != "PreToolUse":
             return HookResult()
 
         try:
+            decision = self.policy.decide_tool(event.tool_name)
+            if decision.action == "deny":
+                return self._to_hook_result(decision)
+
             if event.tool_name in self.path_tools:
-                self._check_workspace_path(event.tool_name, event.arguments)
+                path = self._check_workspace_path(event.tool_name, event.arguments)
+                path_decision = self.policy.decide_path(path)
+                if path_decision.matched_rule is not None:
+                    decision = path_decision
+                if decision.action == "deny":
+                    return self._to_hook_result(decision)
+
             if event.tool_name == "run_command":
-                self._check_command(event.arguments)
+                command = self._required_command(event.arguments)
+                command_decision = self.policy.decide_command(command)
+                if command_decision.matched_rule is not None:
+                    decision = command_decision
+                if decision.action == "deny":
+                    return self._to_hook_result(decision)
         except Exception as exc:
             return HookResult(allowed=False, message=str(exc))
 
-        if event.tool_name in self.confirmation_tools:
-            return HookResult(allowed=True, extra={"requires_confirmation": True})
-        return HookResult()
+        return self._to_hook_result(decision)
 
-    def _check_workspace_path(self, tool_name: str, arguments: dict[str, Any]) -> None:
+    def _check_workspace_path(self, tool_name: str, arguments: dict[str, Any]) -> str:
         path = arguments.get("path", ".") if tool_name == "list_dir" else arguments.get("path")
         if not isinstance(path, str):
             raise ValueError("path must be a string.")
         self.workspace.resolve_path(path)
+        return path
 
-    def _check_command(self, arguments: dict[str, Any]) -> None:
+    def _required_command(self, arguments: dict[str, Any]) -> str:
         command = arguments.get("command")
         if not isinstance(command, str):
             raise ValueError("command must be a string.")
-        for pattern in self.dangerous_command_patterns:
-            if re.search(pattern, command, flags=re.IGNORECASE):
-                raise ValueError(f"Dangerous command blocked by permission hook: {command}")
+        return command
+
+    def _to_hook_result(self, decision: PermissionDecision) -> HookResult:
+        if decision.action == "deny":
+            return HookResult(allowed=False, message=decision.reason)
+        if decision.action == "ask":
+            return HookResult(
+                allowed=True,
+                message=decision.reason,
+                extra={"requires_confirmation": True},
+            )
+        return HookResult()
 
