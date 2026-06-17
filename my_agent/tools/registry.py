@@ -6,6 +6,7 @@ import traceback
 from typing import Any, Callable
 
 from my_agent.hooks.base import HookEvent, HookManager
+from my_agent.permission.confirmer import ConfirmationProvider
 from my_agent.tools.command_tools import CommandTools
 from my_agent.tools.file_tools import FileTools
 from my_agent.workspace.manager import WorkspaceManager
@@ -114,6 +115,7 @@ def execute_tools(
     assistant_message: dict[str, Any],
     tool_handlers: dict[str, ToolHandler],
     hook_manager: HookManager | None = None,
+    confirmation_provider: ConfirmationProvider | None = None,
 ) -> list[dict[str, Any]]:
     tool_results: list[dict[str, Any]] = []
     for tool_call in assistant_message.get("tool_calls") or []:
@@ -134,6 +136,16 @@ def execute_tools(
                 )
                 if not pre_result.allowed:
                     raise PermissionError(pre_result.message)
+                if pre_result.extra.get("requires_confirmation"):
+                    if confirmation_provider is None:
+                        raise PermissionError("Permission confirmation required.")
+                    confirmed = confirmation_provider.confirm(
+                        name,
+                        arguments,
+                        pre_result.message or None,
+                    )
+                    if not confirmed:
+                        raise PermissionError("User denied permission.")
 
             if name not in tool_handlers:
                 raise KeyError(f"Unknown tool: {name}")
