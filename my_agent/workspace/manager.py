@@ -36,6 +36,14 @@ class WorkspaceManager:
             raise IsADirectoryError(f"Path is not a file: {path}")
         return target.read_text(encoding="utf-8")
 
+    def write_text(self, path: str | Path, content: str) -> Path:
+        target = self.resolve_path(path)
+        if target.exists() and not target.is_file():
+            raise IsADirectoryError(f"Path is not a file: {path}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return target
+
     def list_dir(self, path: str | Path = ".") -> list[str]:
         target = self.resolve_path(path)
         if not target.exists():

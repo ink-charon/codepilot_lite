@@ -55,6 +55,37 @@ def build_tool_registry(workspace: WorkspaceManager) -> ToolRegistry:
         {
             "type": "function",
             "function": {
+                "name": "write_file",
+                "description": "Write a complete text file inside the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "edit_file",
+                "description": "Replace text in a file inside the workspace.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string"},
+                    },
+                    "required": ["path", "old_text", "new_text"],
+                },
+            },
+        },
+        {
+            "type": "function",
+            "function": {
                 "name": "run_command",
                 "description": "Run a shell command in the workspace.",
                 "parameters": {
@@ -71,6 +102,8 @@ def build_tool_registry(workspace: WorkspaceManager) -> ToolRegistry:
     tool_handlers: dict[str, ToolHandler] = {
         "read_file": file_tools.read_file,
         "list_dir": file_tools.list_dir,
+        "write_file": file_tools.write_file,
+        "edit_file": file_tools.edit_file,
         "run_command": command_tools.run_command,
     }
     return ToolRegistry(tool_definitions=tool_definitions, tool_handlers=tool_handlers)
