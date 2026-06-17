@@ -9,6 +9,7 @@ from my_agent.hooks.logging import LoggingHook
 from my_agent.hooks.permission import PermissionHook
 from my_agent.llm.client import LLMClient
 from my_agent.permission.confirmer import CliConfirmationProvider
+from my_agent.policy.loader import load_permission_policy
 from my_agent.tools.registry import build_tool_registry
 from my_agent.workspace.manager import WorkspaceManager
 
@@ -16,6 +17,7 @@ from my_agent.workspace.manager import WorkspaceManager
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the local Coding Agent.")
     parser.add_argument("--workspace", default=".", help="Workspace root.")
+    parser.add_argument("--permission-policy", default=None, help="Permission policy file.")
     return parser.parse_args()
 
 
@@ -24,8 +26,9 @@ def main() -> None:
     settings = Settings.from_env()
     workspace = WorkspaceManager(args.workspace)
     registry = build_tool_registry(workspace)
+    policy = load_permission_policy(args.permission_policy)
     hook_manager = HookManager()
-    hook_manager.register("PreToolUse", PermissionHook(workspace))
+    hook_manager.register("PreToolUse", PermissionHook(workspace, policy))
     hook_manager.register("PostToolUse", LoggingHook())
     llm = LLMClient(settings)
 
