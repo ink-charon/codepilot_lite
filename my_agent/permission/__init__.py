@@ -6,11 +6,13 @@ from my_agent.permission.confirmer import (
     CliConfirmationProvider,
     ConfirmationProvider,
 )
+from my_agent.permission.session import PermissionSession
 
 __all__ = [
     "AutoApproveConfirmationProvider",
     "AutoDenyConfirmationProvider",
     "CliConfirmationProvider",
     "ConfirmationProvider",
+    "PermissionSession",
 ]
 

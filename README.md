@@ -1,8 +1,16 @@
 # CodePilot Lite
 
-CodePilot Lite is a lightweight local Coding Agent harness inspired by the `s20_comprehensive` architecture from `learn-claude-code`.
+A lightweight local Coding Agent harness with tool-use loop, workspace-safe file operations, hook-based permissions, interactive confirmation, and policy-driven safety controls.
 
-The project focuses on building a minimal but extensible Agent loop:
+![Tests](https://github.com/ink-charon/codepilot_lite/actions/workflows/test.yml/badge.svg)
+
+## Overview
+
+CodePilot Lite is a lightweight local Coding Agent harness inspired by the core idea behind `learn-claude-code` s20: mechanisms are many, loop is one.
+
+It is not a full Claude Code clone. The project focuses on growing from the smallest useful tool-use loop into a safe, testable, and extensible local Agent harness. The LLM reasons and chooses tools; the Python harness owns tool registration, dispatch, workspace boundaries, permission checks, confirmation, and tool-result feedback.
+
+The core loop is intentionally small:
 
 ```python
 while True:
@@ -15,78 +23,210 @@ while True:
     messages.append(tool_results)
 ```
 
-In Phase 1, CodePilot Lite supports:
+## Features
 
-* Workspace-safe file reading
-* Directory listing
-* Safe command execution
-* Tool registry and tool dispatch
-* Tool result feedback to the LLM
-* Basic pytest coverage
+### Phase 1: Minimal Tool-use Loop
 
-The goal is not to copy a full Claude Code implementation, but to gradually build a clear, testable, and extensible local Coding Agent from a minimal working loop.
-
-
-# my_agent
-
-Phase 1 minimal local Coding Agent.
-
-It implements one loop:
-
-```text
-user input -> LLM -> tool_calls -> execute tools -> tool_result messages -> LLM
-```
-
-Implemented tools:
-
+- LLM tool-use loop
+- Message management
 - `read_file`
 - `list_dir`
 - `run_command`
+- Workspace-safe path resolution
+- Pytest coverage
 
-Not implemented in Phase 1:
+### Phase 2: File Write and Edit Tools
 
 - `write_file`
 - `edit_file`
-- todo
-- hooks
-- permissions plugin system
-- MCP
-- multi-agent
-- cron
-- background tasks
-- memory
-- skills
+- Parent directory creation
+- Workspace boundary checks
 
-## Configure
+### Phase 3: Hook and Permission System
 
-Copy `.env.example` to `.env`, then set your model provider values:
+- `HookEvent`
+- `HookResult`
+- `HookManager`
+- `PreToolUse`
+- `PostToolUse`
+- `PermissionHook`
+- `LoggingHook`
+
+### Phase 4: Interactive Confirmation
+
+- `ConfirmationProvider`
+- `CliConfirmationProvider`
+- `AutoApproveConfirmationProvider`
+- `AutoDenyConfirmationProvider`
+- Confirmation flow for `write_file`, `edit_file`, and `run_command`
+
+### Phase 5: Policy-based Permission System
+
+- `PermissionPolicy`
+- `PermissionDecision`
+- `allow` / `ask` / `deny`
+- Path policy
+- Command policy
+- `--permission-policy` CLI option
+- Default fallback policy
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A[User Input] --> B[Agent Loop]
+    B --> C[LLM]
+    C --> D[tool_use]
+    D --> E[execute_tools]
+    E --> F[PreToolUse]
+    F --> G[PermissionHook]
+    G --> H[PermissionPolicy]
+    H --> I[ConfirmationProvider]
+    I --> J[Tool Handler]
+    J --> K[PostToolUse]
+    K --> L[tool_result]
+    L --> C
+```
+
+## Permission Flow
+
+Current tool execution flow:
+
+```text
+tool_use
+-> PreToolUse
+-> PermissionHook
+-> PermissionPolicy allow / ask / deny
+-> ask: ConfirmationProvider
+-> execute handler
+-> PostToolUse
+-> tool_result
+```
+
+Default behavior:
+
+- `read_file` and `list_dir` are allowed by default.
+- `write_file`, `edit_file`, and `run_command` ask for confirmation by default.
+- Dangerous commands are denied by default.
+- Paths outside the workspace are rejected.
+- Sensitive paths such as `.env` and `secrets/*` can be denied through policy.
+
+## Quick Start
+
+```powershell
+git clone https://github.com/ink-charon/codepilot_lite.git
+cd codepilot_lite
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+python -m my_agent.main --workspace .
+```
+
+Do not commit a real `.env` file. Use `.env.example` as the template for local configuration.
+
+## Configuration
+
+Environment variables:
 
 ```env
-LLM_API_KEY=your_deepseek_api_key_here
-LLM_BASE_URL=https://api.deepseek.com
-LLM_MODEL=deepseek-v4-pro
+LLM_API_KEY=
+LLM_BASE_URL=
+LLM_MODEL=
 AGENT_MAX_TURNS=10
+LLM_RETRIES=2
 COMMAND_TIMEOUT_SECONDS=30
 MAX_COMMAND_OUTPUT_CHARS=12000
 ```
 
-## Run
+Run with an explicit permission policy:
 
 ```powershell
-python -m my_agent.main --workspace .
+python -m my_agent.main --workspace . --permission-policy config/permissions.example.yaml
 ```
 
-Then enter a task:
+Example policy:
+
+```yaml
+permissions:
+  tools:
+    read_file: allow
+    list_dir: allow
+    write_file: ask
+    edit_file: ask
+    run_command: ask
+
+  paths:
+    ".env": deny
+    "secrets/*": deny
+    "README.md": ask
+
+  commands:
+    allow:
+      - "python --version"
+      - "python -m pytest"
+      - "git status"
+    ask:
+      - "git add"
+      - "git commit"
+      - "git push"
+    deny:
+      - "rm -rf /"
+      - "rm -rf *"
+      - "shutdown"
+      - "reboot"
+```
+
+## Testing
+
+```powershell
+python -m pytest --basetemp=.pytest_tmp
+```
+
+Current result:
 
 ```text
-读取 README.md 并总结
+43 passed
 ```
 
-Type `exit` or `quit` to stop.
+On Windows, if `.pytest_tmp` has a local permission issue, remove it and rerun:
 
-## Test
-
-```powershell
-python -m pytest
+```cmd
+rmdir /s /q .pytest_tmp
+python -m pytest --basetemp=.pytest_tmp
 ```
-=======
+
+## Project Structure
+
+```text
+my_agent/
+  agent/        Agent loop, message handling, and system prompt.
+  hooks/        Hook primitives, permission hook, and logging hook.
+  llm/          OpenAI-compatible LLM client.
+  permission/   Interactive confirmation providers.
+  policy/       Policy model and policy loader.
+  tools/        Tool definitions, handlers, registry, and dispatcher.
+  workspace/    Workspace root and safe path resolution.
+config/         Example permission policy files.
+tests/          Pytest coverage for each project phase.
+docs/           Design notes and project documentation.
+```
+
+## Roadmap
+
+- Audit logging and permission observability
+- Better command policy matching
+- Todo manager
+- Context compaction
+- Skill loading
+- MCP integration as future work
+- Multi-agent task graph as future work
+- Worktree isolation
+
+## Design Philosophy
+
+- Mechanisms are many, loop is one.
+- LLM decides, harness executes.
+- Safety belongs to the harness.
+- Tools are separated into definitions and handlers.
+- Permissions are policy-driven and testable.

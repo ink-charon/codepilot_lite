@@ -85,7 +85,7 @@ def test_write_file_requires_confirmation_and_auto_deny_blocks_execution(tmp_pat
 
     assert content["status"] == "error"
     assert content["output"]["type"] == "PermissionError"
-    assert "User denied permission" in content["output"]["error"]
+    assert "不会继续尝试通过其他工具修改该文件" in content["output"]["error"]
     assert not (tmp_path / "notes.txt").exists()
 
 

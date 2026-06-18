@@ -1,10 +1,8 @@
-一、参考目标.md
 .env
 __pycache__/
+*.pyc
 *.py[cod]
 .pytest_cache/
 .pytest_tmp/
-.pytest_cache/
-__pycache__/
-*.pyc
-.env
+.venv/
+一、参考目标.md
