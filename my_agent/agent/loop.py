@@ -8,6 +8,7 @@ from my_agent.config.settings import Settings
 from my_agent.hooks.base import HookManager
 from my_agent.llm.client import LLMClient
 from my_agent.permission.confirmer import ConfirmationProvider
+from my_agent.permission.session import PermissionSession
 from my_agent.tools.registry import ToolRegistry, execute_tools
 from my_agent.workspace.manager import WorkspaceManager
 
@@ -22,6 +23,7 @@ class Agent:
     confirmation_provider: ConfirmationProvider | None = None
 
     def run(self, user_prompt: str) -> str:
+        permission_session = PermissionSession()
         messages: list[Message] = [
             {"role": "system", "content": build_system_prompt(self.workspace)},
             {"role": "user", "content": user_prompt},
@@ -39,6 +41,7 @@ class Agent:
                 self.registry.tool_handlers,
                 hook_manager=self.hook_manager,
                 confirmation_provider=self.confirmation_provider,
+                permission_session=permission_session,
             )
             messages.extend(tool_result_messages)
 

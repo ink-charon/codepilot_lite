@@ -7,11 +7,22 @@ from typing import Any, Callable
 
 from my_agent.hooks.base import HookEvent, HookManager
 from my_agent.permission.confirmer import ConfirmationProvider
+from my_agent.permission.session import PermissionSession
 from my_agent.tools.command_tools import CommandTools
 from my_agent.tools.file_tools import FileTools
 from my_agent.workspace.manager import WorkspaceManager
 
 ToolHandler = Callable[[dict[str, Any]], Any]
+
+FILE_WRITE_DENIED_MESSAGE = (
+    "文件修改操作已被拒绝。我不会继续尝试通过其他工具修改该文件。"
+    "如需继续，请重新发起请求并明确授权写入操作。"
+)
+
+FILE_WRITE_PREVIOUSLY_DENIED_MESSAGE = (
+    "文件修改操作此前已被拒绝。我不会继续尝试通过其他工具修改该文件。"
+    "如需继续，请重新发起请求并明确授权写入操作。"
+)
 
 
 @dataclass
@@ -116,6 +127,7 @@ def execute_tools(
     tool_handlers: dict[str, ToolHandler],
     hook_manager: HookManager | None = None,
     confirmation_provider: ConfirmationProvider | None = None,
+    permission_session: PermissionSession | None = None,
 ) -> list[dict[str, Any]]:
     tool_results: list[dict[str, Any]] = []
     for tool_call in assistant_message.get("tool_calls") or []:
@@ -132,10 +144,16 @@ def execute_tools(
                         tool_name=name,
                         arguments=arguments,
                         tool_call_id=tool_call_id,
+                        extra={"include_file_write_paths": True},
                     )
                 )
                 if not pre_result.allowed:
                     raise PermissionError(pre_result.message)
+                file_write_paths = _file_write_paths_from_extra(pre_result.extra)
+                if permission_session is not None:
+                    for path in file_write_paths:
+                        if permission_session.is_file_write_denied(path):
+                            raise PermissionError(FILE_WRITE_PREVIOUSLY_DENIED_MESSAGE)
                 if pre_result.extra.get("requires_confirmation"):
                     if confirmation_provider is None:
                         raise PermissionError("Permission confirmation required.")
@@ -145,6 +163,11 @@ def execute_tools(
                         pre_result.message or None,
                     )
                     if not confirmed:
+                        if permission_session is not None:
+                            for path in file_write_paths:
+                                permission_session.record_denied_file_write(path)
+                        if file_write_paths:
+                            raise PermissionError(FILE_WRITE_DENIED_MESSAGE)
                         raise PermissionError("User denied permission.")
 
             if name not in tool_handlers:
@@ -188,6 +211,13 @@ def _format_exception(exc: Exception) -> dict[str, Any]:
         "type": type(exc).__name__,
         "traceback": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
     }
+
+
+def _file_write_paths_from_extra(extra: dict[str, Any]) -> list[str]:
+    value = extra.get("file_write_paths")
+    if not isinstance(value, list):
+        return []
+    return [path for path in value if isinstance(path, str)]
 
 
 def _parse_arguments(arguments: Any) -> dict[str, Any]:
